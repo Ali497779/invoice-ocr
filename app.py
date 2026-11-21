@@ -60,8 +60,18 @@ def ocr_page(doc, page_index):
     )
 
 
+@app.route("/", methods=["GET"])
+def index():
+    return Response("OCR Registered Successfully", mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/invoice", methods=["GET"])
+def invoice_index():
+    return Response("OCR Registered Successfully", mimetype="text/plain; charset=utf-8")
+
+
 @app.route("/invoice", methods=["POST"])
-def invoice():
+def invoice_ocr():
     if "file" not in request.files:
         return Response("Please upload PDF using the 'file' field.", status=400)
 
@@ -77,9 +87,7 @@ def invoice():
     doc = None
 
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".pdf", delete=False
-        ) as temp:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp:
             uploaded_file.save(temp)
             temp_path = temp.name
 
@@ -93,14 +101,11 @@ def invoice():
 
         for i, page in enumerate(reader.pages):
             text = (page.extract_text() or "").strip()
-
             if not text:
                 text = ocr_page(doc, i).strip()
-
             if text:
                 extracted_pages.append(text)
 
-        # Return only extracted text
         return Response(
             "\n\n".join(extracted_pages),
             mimetype="text/plain; charset=utf-8"
@@ -113,7 +118,6 @@ def invoice():
     finally:
         if doc is not None:
             doc.close()
-
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
