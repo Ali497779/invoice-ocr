@@ -1,7 +1,5 @@
-
 import os
 import tempfile
-
 from flask import Flask, request, Response
 from pypdf import PdfReader
 
@@ -13,8 +11,8 @@ except ImportError:
 from rapidocr_onnxruntime import RapidOCR
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
-# OCR engine
 engine = RapidOCR()
 
 
@@ -26,7 +24,6 @@ def ocr_page(doc, page_index):
         return ""
 
     items = []
-
     for box, text, score in result:
         ys = [p[1] for p in box]
         xs = [p[0] for p in box]
@@ -63,24 +60,15 @@ def ocr_page(doc, page_index):
     )
 
 
-@app.route("/", methods=["GET"])
-def home():
-    return "Invoice OCR API is running", 200
-
-
-@app.route("/invoice", methods=["GET", "POST"])
+@app.route("/invoice", methods=["POST"])
 def invoice():
+    if "file" not in request.files:
+        return Response("Please upload PDF using the 'file' field.", status=400)
 
-    if request.method == "GET":
-        return "Invoice OCR API is ready. Send PDF using POST.", 200
+    uploaded_file = request.files["file"]
 
-    uploaded_file = request.files.get("file")
-
-    if uploaded_file is None or not uploaded_file.filename:
-        return Response(
-            "PDF file missing. Use form-data key 'file'.",
-            status=400
-        )
+    if not uploaded_file.filename:
+        return Response("Please select a PDF file.", status=400)
 
     if not uploaded_file.filename.lower().endswith(".pdf"):
         return Response("Only PDF files are allowed.", status=400)
@@ -90,9 +78,7 @@ def invoice():
 
     try:
         with tempfile.NamedTemporaryFile(
-            suffix=".pdf",
-            delete=False,
-            dir="/tmp"
+            suffix=".pdf", delete=False
         ) as temp:
             uploaded_file.save(temp)
             temp_path = temp.name
@@ -100,36 +86,29 @@ def invoice():
         reader = PdfReader(temp_path, strict=False)
 
         if reader.is_encrypted:
-            return Response(
-                "Encrypted PDF is not supported.",
-                status=400
-            )
+            return Response("Encrypted PDF is not supported.", status=400)
 
         doc = pymupdf.open(temp_path)
         extracted_pages = []
 
         for i, page in enumerate(reader.pages):
-            # Extract existing PDF text first
             text = (page.extract_text() or "").strip()
 
-            # If no text exists, use OCR
             if not text:
                 text = ocr_page(doc, i).strip()
 
             if text:
                 extracted_pages.append(text)
 
+        # Return only extracted text
         return Response(
             "\n\n".join(extracted_pages),
-            mimetype="text/plain"
+            mimetype="text/plain; charset=utf-8"
         )
 
     except Exception:
         app.logger.exception("PDF extraction failed")
-        return Response(
-            "PDF processing failed. Check Vercel runtime logs.",
-            status=500
-        )
+        return Response("PDF processing failed.", status=500)
 
     finally:
         if doc is not None:
@@ -137,3 +116,12 @@ def invoice():
 
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+@app.errorhandler(413)
+def file_too_large(error):
+    return Response("PDF exceeds the 50 MB limit.", status=413)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=8000, debug=False)
